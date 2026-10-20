@@ -9,28 +9,31 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="大学生向け メンタル不調・気分予報 AI", layout="wide")
 
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
-st.write("生活習慣（睡眠・運動・食事・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
+st.write("現在の気分や生活習慣（睡眠・運動・食事等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# 予測モデル（0〜10のスコア値を基準に算出）
+# 予測モデル（「現在の気分」をベーススコアとして計算）
 class SimplePredictor:
     def predict(self, df_input):
         scores = []
         for _, row in df_input.iterrows():
-            # 1. 睡眠時間 (0~10) : 7以上が理想
-            sleep_effect = (row['sleep_hours'] - 7.0) * 4.0
+            # ベーススコア: 今の気分 (0~10 を 0~100 スケールに変換)
+            base_score = row['current_mood'] * 10.0
+            
+            # 1. 睡眠時間 (0~10) : 7時間を理想とする
+            sleep_effect = (row['sleep_hours'] - 7.0) * 3.0
             # 2. 授業コマ数 (0~10)
-            class_effect = -1.0 * row['classes_count'] * 2.5
+            class_effect = -1.0 * row['classes_count'] * 2.0
             # 3. 食事回数 (0~10) : 3回を基準
-            meal_effect = (row['meal_count'] - 3.0) * 3.0
-            # 4. 運動スコア (0~10) : スコアが高いほどプラス
-            exercise_effect = row['exercise_score'] * 2.5
+            meal_effect = (row['meal_count'] - 3.0) * 2.5
+            # 4. 運動スコア (0~10)
+            exercise_effect = (row['exercise_score'] - 5.0) * 2.0
             # 5. 課題・バイト負荷 (0~10)
-            task_effect = -1.0 * row['task_load'] * 3.0
+            task_effect = -1.0 * row['task_load'] * 2.5
             # 6. 気圧変化
             pressure_effect = -1.0 * np.abs(row['pressure_change']) * 1.5
             
-            # 総合スコア算出
-            score = 65.0 + sleep_effect + class_effect + meal_effect + exercise_effect + task_effect + pressure_effect
+            # 今の気分を軸に各種影響を加算
+            score = base_score + sleep_effect + class_effect + meal_effect + exercise_effect + task_effect + pressure_effect
             scores.append(np.clip(score, 0, 100))
         return np.array(scores)
 
@@ -40,8 +43,11 @@ def load_model():
 
 model = load_model()
 
-# ---------------- サイドバー（0〜10 スコア仕様のアンケート項目） ----------------
+# ---------------- サイドバー（アンケート全項目: 0〜10） ----------------
 st.sidebar.header("📋 あなたの現在の生活状況 (アンケート)")
+
+# 「今の気分」を最上部に追加
+current_mood = st.sidebar.slider("現在の気分 (0:非常に悪い ~ 10:非常に良い)", 0, 10, 5)
 
 sleep = st.sidebar.slider("昨夜の睡眠時間 (0 ~ 10時間)", 0.0, 10.0, 7.0, 0.5)
 classes = st.sidebar.slider("本日の授業コマ数 (0 ~ 10コマ)", 0, 10, 2)
@@ -82,6 +88,7 @@ if weather_df is not None:
     if len(forecast_days) > 0:
         # 入力データフレームの組み立て
         input_data = pd.DataFrame({
+            'current_mood': [current_mood] * len(forecast_days),
             'sleep_hours': [sleep] * len(forecast_days),
             'classes_count': [classes] * len(forecast_days),
             'meal_count': [meal] * len(forecast_days),
@@ -101,7 +108,7 @@ if weather_df is not None:
             ax.plot(forecast_days['date'].astype(str), forecast_days['predicted_mood'], marker='o', color='#4CAF50', linewidth=2)
             ax.axhline(50, color='red', linestyle='--', label='警戒ライン (スコア 50)')
             ax.set_ylim(0, 100)
-            ax.set_ylabel("気分スコア (0:不調 ~ 100:好調)")
+            ax.set_ylabel("予測気分スコア (0:不調 ~ 100:好調)")
             ax.set_title("1日ごとの予測コンディション")
             ax.grid(True, alpha=0.3)
             ax.legend()
@@ -113,7 +120,7 @@ if weather_df is not None:
             min_date = forecast_days.loc[forecast_days['predicted_mood'].idxmin(), 'date']
             
             if min_score < 50:
-                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。運動・食事・睡眠のバランスを整えましょう。")
+                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。無理をせず休養を意識しましょう。")
             else:
                 st.success("🎉 全体的にコンディションは良好な予測です！良い生活習慣を維持しましょう。")
                 
