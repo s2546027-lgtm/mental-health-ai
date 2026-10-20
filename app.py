@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
 import matplotlib.pyplot as plt
-import japanize_matplotlib
 import requests
 from datetime import datetime, timedelta
 
@@ -13,37 +11,18 @@ st.set_page_config(page_title="大学生向け メンタル不調・気分予報
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
 st.write("生活習慣（睡眠・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# ダミーデータの生成とモデル学習
-@st.cache_resource
-def load_and_train():
-    np.random.seed(42)
-    n_samples = 200
+# 予測ロジック（標準ライブラリのみで動作）
+def predict_mood(sleep_h, task_l, p_change):
+    # 睡眠影響 (7時間を基準)
+    sleep_effect = (sleep_h - 7.0) * 5.0
+    # 課題負荷影響 (1~5)
+    task_effect = -1.0 * (task_l - 1) * 6.0
+    # 気圧変化影響
+    pressure_effect = -1.0 * np.abs(p_change) * 2.0
     
-    sleep_hours = np.random.normal(6.5, 1.5, n_samples)
-    task_load = np.random.randint(1, 6, n_samples)
-    pressure_change = np.random.normal(0, 5, n_samples)
-    
-    # 目的変数：気分スコア (0-100)
-    mood = 70 + (sleep_hours - 7) * 5 - task_load * 4 - np.abs(pressure_change) * 1.5 + np.random.normal(0, 5, n_samples)
-    mood = np.clip(mood, 0, 100)
-    
-    df = pd.DataFrame({
-        'sleep_hours': sleep_hours,
-        'task_load': task_load,
-        'pressure_change': pressure_change,
-        'mood': mood
-    })
-    
-    X = df[['sleep_hours', 'task_load', 'pressure_change']]
-    y = df['mood']
-    
-    # エラーを起こさない安定した機械学習モデル
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    
-    return model, X.columns.tolist()
-
-model, feature_names = load_and_train()
+    # スコア算出 (0-100)
+    score = 75.0 + sleep_effect + task_effect + pressure_effect
+    return np.clip(score, 0, 100)
 
 # サイドバー入力
 st.sidebar.header("📋 あなたの現在の生活状況")
@@ -83,13 +62,11 @@ if weather_df is not None:
     
     if len(forecast_days) > 0:
         # 予測の実行
-        input_data = pd.DataFrame({
-            'sleep_hours': [sleep] * len(forecast_days),
-            'task_load': [task] * len(forecast_days),
-            'pressure_change': forecast_days['pressure_change']
-        })
-        
-        forecast_days['predicted_mood'] = model.predict(input_data)
+        scores = []
+        for p_change in forecast_days['pressure_change']:
+            scores.append(predict_mood(sleep, task, p_change))
+            
+        forecast_days['predicted_mood'] = scores
         
         # 画面表示
         st.subheader("🔮 今後1週間のメンタル・気分予測結果")
