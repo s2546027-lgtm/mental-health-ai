@@ -154,7 +154,6 @@ def load_and_train():
       max_depth=3,
       min_child_samples=1,
       random_state=42,
-      verbose=-1,
   )
   model.fit(X, y)
 
