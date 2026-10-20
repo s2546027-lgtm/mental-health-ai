@@ -19,7 +19,7 @@ class SimplePredictor:
             # ベーススコア: 今の気分 (0~10)
             base_score = row['current_mood']
             
-            # 各生活習慣の影響（0~10 スケールに合わせて調整）
+            # 各生活習慣の影響
             sleep_effect = (row['sleep_hours'] - 7.0) * 0.3
             class_effect = -1.0 * row['classes_count'] * 0.2
             meal_effect = (row['meal_count'] - 3.0) * 0.25
@@ -78,7 +78,7 @@ if weather_df is not None:
     forecast_days = daily_weather[daily_weather['date'] >= today].head(7).copy()
     
     if len(forecast_days) > 0:
-        # 入力データフレーム
+        # 入力データフレーム組み立て
         input_data = pd.DataFrame({
             'current_mood': [current_mood] * len(forecast_days),
             'sleep_hours': [sleep] * len(forecast_days),
@@ -96,35 +96,29 @@ if weather_df is not None:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            # 見やすいグラフのデザイン設定
             fig, ax = plt.subplots(figsize=(10, 4.5))
             
-            # 折れ線 & データ点プロット
-            dates_str = forecast_days['date'].astype(str)
-            scores = forecast_days['predicted_mood']
+            x_labels = [d.strftime('%m/%d') for d in forecast_days['date']]
+            y_values = forecast_days['predicted_mood'].tolist()
             
-            ax.plot(dates_str, scores, marker='o', color='#1E88E5', linewidth=2.5, markersize=8, label='予測気分スコア')
+            # 折れ線描画
+            ax.plot(x_labels, y_values, marker='o', color='#1E88E5', linewidth=2.5, markersize=8, label='Score')
             
-            # 数値テキストの表示（各点の上に数値を明記）
-            for i, score in enumerate(scores):
-                ax.annotate(f"{score:.1f}", (dates_str.iloc[i], score),
-                            textcoords="offset points", xytext=(0, 10), ha='center',
-                            fontsize=10, fontweight='bold', color='#1565C0')
+            # 各点の上に数値のラベルを表示
+            for i, val in enumerate(y_values):
+                ax.text(i, val + 0.3, f"{val:.1f}", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#1565C0')
             
             # 警戒ライン（5.0）
-            ax.axhline(5.0, color='#E53935', linestyle='--', linewidth=1.5, label='警戒ライン (スコア 5)')
+            ax.axhline(5.0, color='#E53935', linestyle='--', linewidth=1.5, label='Warning (5.0)')
             
             # 軸・範囲の設定 (0 ~ 10)
             ax.set_ylim(-0.5, 10.5)
             ax.set_yticks(range(0, 11))
-            ax.set_ylabel("予測気分スコア (0:不調 ~ 10:好調)", fontsize=11)
-            ax.set_title("1日ごとのコンディション推移", fontsize=13, fontweight='bold', pad=12)
+            ax.set_ylabel("Predicted Mood (0~10)")
+            ax.set_title("1-Week Mood Forecast")
             
-            # グリッド & 背景デザイン調整
             ax.grid(True, linestyle=':', alpha=0.6)
-            ax.legend(loc='lower right', frameon=True)
-            plt.xticks(rotation=15)
-            plt.tight_layout()
+            ax.legend(loc='lower right')
             
             st.pyplot(fig)
             
@@ -138,7 +132,7 @@ if weather_df is not None:
             else:
                 st.success(f"🎉 1週間を通してコンディションは良好な予測です！（最低スコア: {min_score:.1f}）")
                 
-        # 表表示（0〜10スコア）
+        # データ表（0〜10スコア）
         st.dataframe(forecast_days[['date', 'predicted_mood', 'pressure_change']].rename(columns={
             'date': '日付',
             'predicted_mood': '予測気分スコア (0-10)',
