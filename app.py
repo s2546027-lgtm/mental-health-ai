@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
 import matplotlib.pyplot as plt
-import japanize_matplotlib
 import requests
 from datetime import datetime
 
@@ -13,35 +11,18 @@ st.set_page_config(page_title="大学生向け メンタル不調・気分予報
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
 st.write("生活習慣（睡眠・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# モデル学習（Scikit-Learn で確実に動作させます）
-@st.cache_resource
-def load_and_train():
-    np.random.seed(42)
-    n_samples = 200
+# ルールベース＆線形推論アルゴリズム（外部重いライブラリ不要で100%動作）
+def predict_mood(sleep_hours, task_load, pressure_change):
+    # 睡眠影響: 7時間を適性とし±で加減算
+    sleep_score = (sleep_hours - 7.0) * 6.0
+    # 課題負荷影響: 1(低)~5(高)
+    task_score = -1.0 * (task_load - 1) * 7.0
+    # 気圧変化影響: 絶対値が大きいほど不調
+    pressure_score = -1.0 * np.abs(pressure_change) * 2.5
     
-    sleep_hours = np.random.normal(6.5, 1.5, n_samples)
-    task_load = np.random.randint(1, 6, n_samples)
-    pressure_change = np.random.normal(0, 5, n_samples)
-    
-    mood = 70 + (sleep_hours - 7) * 5 - task_load * 4 - np.abs(pressure_change) * 1.5 + np.random.normal(0, 5, n_samples)
-    mood = np.clip(mood, 0, 100)
-    
-    df = pd.DataFrame({
-        'sleep_hours': sleep_hours,
-        'task_load': task_load,
-        'pressure_change': pressure_change,
-        'mood': mood
-    })
-    
-    X = df[['sleep_hours', 'task_load', 'pressure_change']]
-    y = df['mood']
-    
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    
-    return model, X.columns.tolist()
-
-model, feature_names = load_and_train()
+    # 基準点 75 点から算出
+    base_score = 75.0 + sleep_score + task_score + pressure_score
+    return np.clip(base_score, 0, 100)
 
 # サイドバー入力
 st.sidebar.header("📋 あなたの現在の生活状況")
@@ -50,20 +31,22 @@ task = st.sidebar.slider("現在の課題・バイト負荷 (1:低 ~ 5:高)", 1,
 lat = st.sidebar.number_input("緯度 (デフォルト: 東京)", value=35.6762)
 lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503)
 
-# 気象データ取得
+# 気象データ取得 (Open-Meteo API)
 @st.cache_data(ttl=3600)
 def get_weather_forecast(latitude, longitude):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=surface_pressure&timezone=Asia%2FTokyo"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        df_weather = pd.DataFrame({
-            'time': pd.to_datetime(data['hourly']['time']),
-            'pressure': data['hourly']['surface_pressure']
-        })
-        return df_weather
-    else:
-        return None
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            df_weather = pd.DataFrame({
+                'time': pd.to_datetime(data['hourly']['time']),
+                'pressure': data['hourly']['surface_pressure']
+            })
+            return df_weather
+    except Exception:
+        pass
+    return None
 
 weather_df = get_weather_forecast(lat, lon)
 
@@ -76,13 +59,12 @@ if weather_df is not None:
     forecast_days = daily_weather[daily_weather['date'] >= today].head(7).copy()
     
     if len(forecast_days) > 0:
-        input_data = pd.DataFrame({
-            'sleep_hours': [sleep] * len(forecast_days),
-            'task_load': [task] * len(forecast_days),
-            'pressure_change': forecast_days['pressure_change']
-        })
-        
-        forecast_days['predicted_mood'] = model.predict(input_data)
+        # 各日付の予測スコアを計算
+        scores = []
+        for p_change in forecast_days['pressure_change']:
+            scores.append(predict_mood(sleep, task, p_change))
+            
+        forecast_days['predicted_mood'] = scores
         
         st.subheader("🔮 今後1週間のメンタル・気分予測結果")
         col1, col2 = st.columns([2, 1])
