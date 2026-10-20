@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
 import matplotlib.pyplot as plt
-import japanize_matplotlib
 import requests
 from datetime import datetime, timedelta
 
@@ -11,48 +9,51 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="大学生向け メンタル不調・気分予報 AI", layout="wide")
 
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
-st.write("生活習慣（睡眠・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
+st.write("生活習慣（睡眠・運動・食事・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# ダミーデータの生成とモデル学習
+# 予測モデル（0〜10のスコア値を基準に算出）
+class SimplePredictor:
+    def predict(self, df_input):
+        scores = []
+        for _, row in df_input.iterrows():
+            # 1. 睡眠時間 (0~10) : 7以上が理想
+            sleep_effect = (row['sleep_hours'] - 7.0) * 4.0
+            # 2. 授業コマ数 (0~10)
+            class_effect = -1.0 * row['classes_count'] * 2.5
+            # 3. 食事回数 (0~10) : 3回を基準
+            meal_effect = (row['meal_count'] - 3.0) * 3.0
+            # 4. 運動スコア (0~10) : スコアが高いほどプラス
+            exercise_effect = row['exercise_score'] * 2.5
+            # 5. 課題・バイト負荷 (0~10)
+            task_effect = -1.0 * row['task_load'] * 3.0
+            # 6. 気圧変化
+            pressure_effect = -1.0 * np.abs(row['pressure_change']) * 1.5
+            
+            # 総合スコア算出
+            score = 65.0 + sleep_effect + class_effect + meal_effect + exercise_effect + task_effect + pressure_effect
+            scores.append(np.clip(score, 0, 100))
+        return np.array(scores)
+
 @st.cache_resource
-def load_and_train():
-    np.random.seed(42)
-    n_samples = 200
-    
-    sleep_hours = np.random.normal(6.5, 1.5, n_samples)
-    task_load = np.random.randint(1, 6, n_samples)
-    pressure_change = np.random.normal(0, 5, n_samples)
-    
-    # 目的変数：気分スコア (0-100)
-    mood = 70 + (sleep_hours - 7) * 5 - task_load * 4 - np.abs(pressure_change) * 1.5 + np.random.normal(0, 5, n_samples)
-    mood = np.clip(mood, 0, 100)
-    
-    df = pd.DataFrame({
-        'sleep_hours': sleep_hours,
-        'task_load': task_load,
-        'pressure_change': pressure_change,
-        'mood': mood
-    })
-    
-    X = df[['sleep_hours', 'task_load', 'pressure_change']]
-    y = df['mood']
-    
-    # 安定して動作する機械学習モデル
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    
-    return model, X.columns.tolist()
+def load_model():
+    return SimplePredictor()
 
-model, feature_names = load_and_train()
+model = load_model()
 
-# サイドバー入力 (一番最初と全く同じ記述・順序)
-st.sidebar.header("📋 あなたの現在の生活状況")
-sleep = st.sidebar.slider("昨夜の睡眠時間 (時間)", 0.0, 12.0, 7.0, 0.5)
-task = st.sidebar.slider("現在の課題・バイト負荷 (1:低 ~ 5:高)", 1, 5, 3)
+# ---------------- サイドバー（0〜10 スコア仕様のアンケート項目） ----------------
+st.sidebar.header("📋 あなたの現在の生活状況 (アンケート)")
+
+sleep = st.sidebar.slider("昨夜の睡眠時間 (0 ~ 10時間)", 0.0, 10.0, 7.0, 0.5)
+classes = st.sidebar.slider("本日の授業コマ数 (0 ~ 10コマ)", 0, 10, 2)
+meal = st.sidebar.slider("本日の食事回数 (0 ~ 10回)", 0, 10, 3)
+exercise = st.sidebar.slider("運動したスコア (0:全くしていない ~ 10:しっかりした)", 0, 10, 5)
+task = st.sidebar.slider("課題・バイト負荷スコア (0:低 ~ 10:高)", 0, 10, 5)
+
+st.sidebar.subheader("📍 位置情報（気象データ用）")
 lat = st.sidebar.number_input("緯度 (デフォルト: 東京)", value=35.6762)
 lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503)
 
-# 気象データ取得 (Open-Meteo API)
+# ---------------- 気象データ取得 (Open-Meteo API) ----------------
 @st.cache_data(ttl=3600)
 def get_weather_forecast(latitude, longitude):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=surface_pressure&timezone=Asia%2FTokyo"
@@ -60,11 +61,10 @@ def get_weather_forecast(latitude, longitude):
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            df_weather = pd.DataFrame({
+            return pd.DataFrame({
                 'time': pd.to_datetime(data['hourly']['time']),
                 'pressure': data['hourly']['surface_pressure']
             })
-            return df_weather
     except Exception:
         pass
     return None
@@ -72,19 +72,20 @@ def get_weather_forecast(latitude, longitude):
 weather_df = get_weather_forecast(lat, lon)
 
 if weather_df is not None:
-    # 日別の平均気圧と変化量を計算
     weather_df['date'] = weather_df['time'].dt.date
     daily_weather = weather_df.groupby('date')['pressure'].mean().reset_index()
     daily_weather['pressure_change'] = daily_weather['pressure'].diff().fillna(0)
     
-    # 今後7日分を取得
     today = datetime.now().date()
     forecast_days = daily_weather[daily_weather['date'] >= today].head(7).copy()
     
     if len(forecast_days) > 0:
-        # 予測の実行 (一番最初と同じ入力データフレーム作成の書き方)
+        # 入力データフレームの組み立て
         input_data = pd.DataFrame({
             'sleep_hours': [sleep] * len(forecast_days),
+            'classes_count': [classes] * len(forecast_days),
+            'meal_count': [meal] * len(forecast_days),
+            'exercise_score': [exercise] * len(forecast_days),
             'task_load': [task] * len(forecast_days),
             'pressure_change': forecast_days['pressure_change']
         })
@@ -93,7 +94,6 @@ if weather_df is not None:
         
         # 画面表示
         st.subheader("🔮 今後1週間のメンタル・気分予測結果")
-        
         col1, col2 = st.columns([2, 1])
         
         with col1:
@@ -113,9 +113,9 @@ if weather_df is not None:
             min_date = forecast_days.loc[forecast_days['predicted_mood'].idxmin(), 'date']
             
             if min_score < 50:
-                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。気圧変化や課題負荷の影響を受けやすいため、十分な睡眠を確保しましょう。")
+                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。運動・食事・睡眠のバランスを整えましょう。")
             else:
-                st.success("🎉 全体的にコンディションは良好な予測です！このペースを維持しましょう。")
+                st.success("🎉 全体的にコンディションは良好な予測です！良い生活習慣を維持しましょう。")
                 
         st.dataframe(forecast_days[['date', 'predicted_mood', 'pressure_change']].rename(columns={
             'date': '日付',
