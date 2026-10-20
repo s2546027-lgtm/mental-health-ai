@@ -9,29 +9,43 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="大学生向け メンタル不調・気分予報 AI", layout="wide")
 
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
-st.write("生活習慣（睡眠・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
+st.write("生活習慣（睡眠・授業コマ数・食事・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# 予測ロジック（標準ライブラリのみで動作）
-def predict_mood(sleep_h, task_l, p_change):
-    # 睡眠影響 (7時間を基準)
+# 予測計算ロジック（アンケートの各項目を反映）
+def predict_mood(sleep_h, class_count, meal_status, task_l, p_change):
+    # 睡眠影響 (7時間を標準とする)
     sleep_effect = (sleep_h - 7.0) * 5.0
-    # 課題負荷影響 (1~5)
-    task_effect = -1.0 * (task_l - 1) * 6.0
-    # 気圧変化影響
+    
+    # 授業コマ数影響 (1コマあたり -3点)
+    class_effect = -1.0 * class_count * 3.0
+    
+    # 食事状況影響
+    meal_dict = {"しっかりとった": 5.0, "軽く済ませた": 0.0, "抜いてしまった": -8.0}
+    meal_effect = meal_dict.get(meal_status, 0.0)
+    
+    # 課題・バイト負荷影響 (1:低 ~ 5:高)
+    task_effect = -1.0 * (task_l - 1) * 5.0
+    
+    # 気圧変化影響 (気圧差が大きいほど不調)
     pressure_effect = -1.0 * np.abs(p_change) * 2.0
     
-    # スコア算出 (0-100)
-    score = 75.0 + sleep_effect + task_effect + pressure_effect
+    # ベーススコア 75点に統合 (0~100にクリップ)
+    score = 75.0 + sleep_effect + class_effect + meal_effect + task_effect + pressure_effect
     return np.clip(score, 0, 100)
 
-# サイドバー入力
-st.sidebar.header("📋 あなたの現在の生活状況")
+# ---------------- サイドバー（アンケート入力欄） ----------------
+st.sidebar.header("📋 あなたの現在の生活状況 (アンケート)")
+
 sleep = st.sidebar.slider("昨夜の睡眠時間 (時間)", 0.0, 12.0, 7.0, 0.5)
+classes = st.sidebar.slider("本日の授業コマ数 (コマ)", 0, 6, 2)
+meal = st.sidebar.selectbox("今日の食事状況", ["しっかりとった", "軽く済ませた", "抜いてしまった"])
 task = st.sidebar.slider("現在の課題・バイト負荷 (1:低 ~ 5:高)", 1, 5, 3)
+
+st.sidebar.subheader("📍 位置情報（気象データ用）")
 lat = st.sidebar.number_input("緯度 (デフォルト: 東京)", value=35.6762)
 lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503)
 
-# 気象データ取得 (Open-Meteo API)
+# ---------------- 気象データ取得 (Open-Meteo API) ----------------
 @st.cache_data(ttl=3600)
 def get_weather_forecast(latitude, longitude):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=surface_pressure&timezone=Asia%2FTokyo"
@@ -61,10 +75,10 @@ if weather_df is not None:
     forecast_days = daily_weather[daily_weather['date'] >= today].head(7).copy()
     
     if len(forecast_days) > 0:
-        # 予測の実行
+        # 各日付の予測スコアを計算
         scores = []
         for p_change in forecast_days['pressure_change']:
-            scores.append(predict_mood(sleep, task, p_change))
+            scores.append(predict_mood(sleep, classes, meal, task, p_change))
             
         forecast_days['predicted_mood'] = scores
         
@@ -90,9 +104,9 @@ if weather_df is not None:
             min_date = forecast_days.loc[forecast_days['predicted_mood'].idxmin(), 'date']
             
             if min_score < 50:
-                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。気圧変化や課題負荷の影響を受けやすいため、十分な睡眠を確保しましょう。")
+                st.warning(f"⚠️ **{min_date}** 付近で調子が下がる予測です。授業コマ数や課題負荷、食事・気圧変化の影響を受けやすいため、十分な休養を意識しましょう。")
             else:
-                st.success("🎉 全体的にコンディションは良好な予測です！このペースを維持しましょう。")
+                st.success("🎉 全体的にコンディションは良好な予測です！良い生活リズムを維持しましょう。")
                 
         st.dataframe(forecast_days[['date', 'predicted_mood', 'pressure_change']].rename(columns={
             'date': '日付',
