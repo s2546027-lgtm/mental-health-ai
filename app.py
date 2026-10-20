@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import lightgbm as lgb
 import matplotlib.pyplot as plt
-import japanize_matplotlib
 import requests
 from datetime import datetime, timedelta
 
@@ -13,42 +11,13 @@ st.set_page_config(page_title="大学生向け メンタル不調・気分予報
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
 st.write("生活習慣（睡眠・課題等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# ダミーデータの生成とモデル学習
-@st.cache_resource
-def load_and_train():
-    np.random.seed(42)
-    n_samples = 200
-    
-    sleep_hours = np.random.normal(6.5, 1.5, n_samples)
-    task_load = np.random.randint(1, 6, n_samples)
-    pressure_change = np.random.normal(0, 5, n_samples)
-    
-    # 目的変数：気分スコア (0-100)
-    mood = 70 + (sleep_hours - 7) * 5 - task_load * 4 - np.abs(pressure_change) * 1.5 + np.random.normal(0, 5, n_samples)
-    mood = np.clip(mood, 0, 100)
-    
-    df = pd.DataFrame({
-        'sleep_hours': sleep_hours,
-        'task_load': task_load,
-        'pressure_change': pressure_change,
-        'mood': mood
-    })
-    
-    X = df[['sleep_hours', 'task_load', 'pressure_change']]
-    y = df['mood']
-    
-    model = lgb.LGBMRegressor(
-        n_estimators=100,
-        learning_rate=0.05,
-        max_depth=5,
-        random_state=42,
-        verbose=-1
-    )
-    model.fit(X, y)
-    
-    return model, X.columns.tolist()
-
-model, feature_names = load_and_train()
+# 予測ロジック（エラー回避版）
+def predict_mood(sleep_h, task_l, p_change):
+    sleep_effect = (sleep_h - 7.0) * 5.0
+    task_effect = -1.0 * (task_l - 1) * 4.0
+    pressure_effect = -1.0 * np.abs(p_change) * 1.5
+    mood_score = 70.0 + sleep_effect + task_effect + pressure_effect
+    return np.clip(mood_score, 0, 100)
 
 # サイドバー入力
 st.sidebar.header("📋 あなたの現在の生活状況")
@@ -61,16 +30,18 @@ lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503
 @st.cache_data(ttl=3600)
 def get_weather_forecast(latitude, longitude):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=surface_pressure&timezone=Asia%2FTokyo"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        df_weather = pd.DataFrame({
-            'time': pd.to_datetime(data['hourly']['time']),
-            'pressure': data['hourly']['surface_pressure']
-        })
-        return df_weather
-    else:
-        return None
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            df_weather = pd.DataFrame({
+                'time': pd.to_datetime(data['hourly']['time']),
+                'pressure': data['hourly']['surface_pressure']
+            })
+            return df_weather
+    except Exception:
+        pass
+    return None
 
 weather_df = get_weather_forecast(lat, lon)
 
@@ -86,13 +57,8 @@ if weather_df is not None:
     
     if len(forecast_days) > 0:
         # 予測の実行
-        input_data = pd.DataFrame({
-            'sleep_hours': [sleep] * len(forecast_days),
-            'task_load': [task] * len(forecast_days),
-            'pressure_change': forecast_days['pressure_change']
-        })
-        
-        forecast_days['predicted_mood'] = model.predict(input_data)
+        scores = [predict_mood(sleep, task, p_change) for p_change in forecast_days['pressure_change']]
+        forecast_days['predicted_mood'] = scores
         
         # 画面表示
         st.subheader("🔮 今後1週間のメンタル・気分予測結果")
