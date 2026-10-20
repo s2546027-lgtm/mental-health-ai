@@ -11,15 +11,15 @@ st.set_page_config(page_title="大学生向け メンタル不調・気分予報
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
 st.write("現在の気分や生活習慣（睡眠・運動・食事等）と Open-Meteo 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。")
 
-# 予測モデル（出力スコアを 0〜10 スケールに統一）
+# 予測モデル（確実に 0.0 ~ 10.0 の範囲で出力）
 class SimplePredictor:
     def predict(self, df_input):
         scores = []
         for _, row in df_input.iterrows():
             # ベーススコア: 今の気分 (0~10)
-            base_score = row['current_mood']
+            base_score = float(row['current_mood'])
             
-            # 各生活習慣の影響
+            # 各生活習慣の調整値 (すべて 0~10 スケール基準)
             sleep_effect = (row['sleep_hours'] - 7.0) * 0.3
             class_effect = -1.0 * row['classes_count'] * 0.2
             meal_effect = (row['meal_count'] - 3.0) * 0.25
@@ -27,8 +27,9 @@ class SimplePredictor:
             task_effect = -1.0 * row['task_load'] * 0.25
             pressure_effect = -1.0 * np.abs(row['pressure_change']) * 0.15
             
+            # 合算して 0.0 ~ 10.0 に収める
             score = base_score + sleep_effect + class_effect + meal_effect + exercise_effect + task_effect + pressure_effect
-            scores.append(np.clip(score, 0, 10))
+            scores.append(round(np.clip(score, 0.0, 10.0), 1))
         return np.array(scores)
 
 @st.cache_resource
@@ -101,21 +102,21 @@ if weather_df is not None:
             x_labels = [d.strftime('%m/%d') for d in forecast_days['date']]
             y_values = forecast_days['predicted_mood'].tolist()
             
-            # 折れ線描画
-            ax.plot(x_labels, y_values, marker='o', color='#1E88E5', linewidth=2.5, markersize=8, label='Score')
+            # 折れ線プロット
+            ax.plot(x_labels, y_values, marker='o', color='#1E88E5', linewidth=2.5, markersize=8, label='予測気分スコア (0~10)')
             
-            # 各点の上に数値のラベルを表示
+            # 各点の上に数値を明記
             for i, val in enumerate(y_values):
                 ax.text(i, val + 0.3, f"{val:.1f}", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#1565C0')
             
             # 警戒ライン（5.0）
-            ax.axhline(5.0, color='#E53935', linestyle='--', linewidth=1.5, label='Warning (5.0)')
+            ax.axhline(5.0, color='#E53935', linestyle='--', linewidth=1.5, label='警戒ライン (5.0)')
             
-            # 軸・範囲の設定 (0 ~ 10)
-            ax.set_ylim(-0.5, 10.5)
+            # Y軸の範囲を 0 〜 10 に固定
+            ax.set_ylim(0, 10.5)
             ax.set_yticks(range(0, 11))
-            ax.set_ylabel("Predicted Mood (0~10)")
-            ax.set_title("1-Week Mood Forecast")
+            ax.set_ylabel("気分スコア (0:不調 ~ 10:好調)")
+            ax.set_title("1日ごとの気分予測推移")
             
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.legend(loc='lower right')
@@ -132,7 +133,7 @@ if weather_df is not None:
             else:
                 st.success(f"🎉 1週間を通してコンディションは良好な予測です！（最低スコア: {min_score:.1f}）")
                 
-        # データ表（0〜10スコア）
+        # データ表表示
         st.dataframe(forecast_days[['date', 'predicted_mood', 'pressure_change']].rename(columns={
             'date': '日付',
             'predicted_mood': '予測気分スコア (0-10)',
