@@ -86,13 +86,18 @@ if weather_df is not None and model is not None:
     # Colabで学習させた特徴量（列名）に合わせてデータフレームを作成
     # ※ Colab学習時の列名と完全に一致させてください
     input_data = pd.DataFrame({
-        "current_mood": [current_mood] * len(forecast_days),
+        "health_score": [health_score] * len(forecast_days),
         "sleep_hours": [sleep] * len(forecast_days),
-        "classes_count": [classes] * len(forecast_days),
         "meal_count": [meal] * len(forecast_days),
         "exercise_score": [exercise] * len(forecast_days),
-        "task_load": [task] * len(forecast_days),
-        "pressure_change": forecast_days["pressure_change"],
+        "class_count": [class_count] * len(forecast_days),
+        "work_hours": [work] * len(forecast_days),
+        "has_task": [has] * len(forecast_days),
+        "task_unaccomplished_rate": [task_unaccomplished_rate] * len(forecast_days),
+        "task_deadline_days": [task_deadline_days] * len(forecast_days),
+        "pressure": [pressure] * len(forecast_days),
+        "pressure_diff": [pressure_diff] * len(forecast_days),
+        "max_temp": forecast_days["max_temp"],
     })
 
     # Colabモデルでの予測実行
