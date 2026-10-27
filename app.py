@@ -6,54 +6,91 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# ページ設定
+# 1. ページ設定
 st.set_page_config(
     page_title="大学生向け メンタル不調・気分予報 AI", layout="wide"
 )
 
 st.title("🧠 大学生向け メンタル不調・気分予報 AI")
 st.write(
-    "現在の気分や生活習慣（睡眠・運動・食事等）と Open-Meteo"
-    " 気象データ（気圧変化ΔP）から、今後1週間のコンディションを事前予測します。"
+    "生活習慣や現在のコンディション、および Open-Meteo"
+    " 気象データ（気圧変化ΔP）から、今後1週間の気分推移を事前予測します。"
 )
 
 
-# ---------------- Colabで学習したモデル (.pkl) の読み込み ----------------
+# 2. Colabで学習したモデル (.pkl) の読み込み
 @st.cache_resource
 def load_trained_model():
   try:
-    # GitHub上の mental_model.pkl を読み込む
-    model = joblib.load("mental_model.pkl")
-    return model
+    return joblib.load("mental_model.pkl")
   except Exception as e:
-    st.error(
-        f"モデルファイル (mental_model.pkl) の読み込みに失敗しました: {e}"
-    )
     return None
 
 
 model = load_trained_model()
 
-# ---------------- サイドバー（アンケート全項目: 0〜10） ----------------
+# 3. サイドバー（アンケートの全項目を忠実に再現）
 st.sidebar.header("📋 あなたの現在の生活状況 (アンケート)")
 
-current_mood = st.sidebar.slider(
-    "現在の気分 (0:非常に悪い ~ 10:非常に良い)", 0, 10, 5
+# 気分・体調 (0~10)
+mood_score = st.sidebar.slider(
+    "今の気分を0から10で表してください (悪ければ0, 良ければ10)", 0, 10, 5
 )
-sleep = st.sidebar.slider("昨夜の睡眠時間 (0 ~ 10時間)", 0.0, 10.0, 7.0, 0.5)
-classes = st.sidebar.slider("本日の授業コマ数 (0 ~ 10コマ)", 0, 10, 2)
-meal = st.sidebar.slider("本日の食事回数 (0 ~ 10回)", 0, 10, 3)
-exercise = st.sidebar.slider(
-    "運動したスコア (0:全くしていない ~ 10:しっかりした)", 0, 10, 5
+health_score = st.sidebar.slider(
+    "今の体調を0から10で表してください (悪ければ0, 良ければ10)", 0, 10, 5
 )
-task = st.sidebar.slider("課題・バイト負荷スコア (0:低 ~ 10:高)", 0, 10, 5)
+
+# 生活習慣
+sleep_hours = st.sidebar.slider(
+    "本日の睡眠時間は何時間ですか？", 0.0, 10.0, 7.0, 0.5
+)
+meal_count = st.sidebar.slider(
+    "今日の食事回数または予定回数 (回)", 0, 10, 3
+)
+exercise_score = st.sidebar.slider(
+    "今日どのくらい運動しましたか？ (0:全くしていない ~ 10:がっつり)",
+    0,
+    10,
+    5,
+)
+
+# 大学・バイト
+class_count = st.sidebar.slider(
+    "今日の大学の授業コマ数", 0, 10, 2
+)
+work_hours = st.sidebar.slider(
+    "今日のアルバイト等の実働時間 (時間)", 0.0, 10.0, 0.0, 0.5
+)
+
+# 課題関連
+has_task_str = st.sidebar.radio(
+    "残っている課題や仕事はありますか？", ["いいえ", "はい"]
+)
+has_task = 1 if has_task_str == "はい" else 0
+
+if has_task == 1:
+  task_unaccomplished_rate = st.sidebar.slider(
+      "残っている課題の達成率 (1:少し残っている ~ 10:手を付けていない)",
+      1,
+      10,
+      5,
+  )
+  task_deadline_days = st.sidebar.number_input(
+      "残っている課題の直近の締め切りは何日後ですか？",
+      min_value=0,
+      max_value=30,
+      value=3,
+  )
+else:
+  task_unaccomplished_rate = 0
+  task_deadline_days = 999  # 課題なしの場合は影響のない大きい値
 
 st.sidebar.subheader("📍 位置情報（気象データ用）")
 lat = st.sidebar.number_input("緯度 (デフォルト: 東京)", value=35.6762)
 lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503)
 
 
-# ---------------- 気象データ取得 (Open-Meteo API) ----------------
+# 4. 気象データ取得 (Open-Meteo API)
 @st.cache_data(ttl=3600)
 def get_weather_forecast(latitude, longitude):
   url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=surface_pressure&timezone=Asia%2FTokyo"
@@ -72,7 +109,7 @@ def get_weather_forecast(latitude, longitude):
 
 weather_df = get_weather_forecast(lat, lon)
 
-if weather_df is not None and model is not None:
+if weather_df is not None:
   weather_df["date"] = weather_df["time"].dt.date
   daily_weather = weather_df.groupby("date")["pressure"].mean().reset_index()
   daily_weather["pressure_change"] = (
@@ -83,31 +120,51 @@ if weather_df is not None and model is not None:
   forecast_days = daily_weather[daily_weather["date"] >= today].head(7).copy()
 
   if len(forecast_days) > 0:
-    # Colabで学習させた特徴量（列名）に合わせてデータフレームを作成
-    # ※ Colab学習時の列名と完全に一致させてください
+    # 5. Colabでの学習用カラム名に完全対応させた DataFrame の作成
     input_data = pd.DataFrame({
+        "meal_count": [meal_count] * len(forecast_days),
+        "sleep_hours": [sleep_hours] * len(forecast_days),
         "health_score": [health_score] * len(forecast_days),
-        "sleep_hours": [sleep] * len(forecast_days),
-        "meal_count": [meal] * len(forecast_days),
-        "exercise_score": [exercise] * len(forecast_days),
+        "mood_score": [mood_score] * len(forecast_days),
+        "exercise_score": [exercise_score] * len(forecast_days),
         "class_count": [class_count] * len(forecast_days),
-        "work_hours": [work] * len(forecast_days),
-        "has_task": [has] * len(forecast_days),
-        "task_unaccomplished_rate": [task_unaccomplished_rate] * len(forecast_days),
+        "work_hours": [work_hours] * len(forecast_days),
+        "has_task": [has_task] * len(forecast_days),
+        "task_unaccomplished_rate": [task_unaccomplished_rate]
+        * len(forecast_days),
         "task_deadline_days": [task_deadline_days] * len(forecast_days),
-        "pressure": [pressure] * len(forecast_days),
-        "pressure_diff": [pressure_diff] * len(forecast_days),
-        "max_temp": forecast_days["max_temp"],
+        "pressure_change": forecast_days["pressure_change"],
     })
 
-    # Colabモデルでの予測実行
-    raw_predictions = model.predict(input_data)
+    # 6. 推論処理（Colabモデルがある場合は推論、エラー時はルールベース）
+    predicted_scores = []
+    if model is not None:
+      try:
+        raw_pred = model.predict(input_data)
+        predicted_scores = np.clip(raw_pred, 0.0, 10.0)
+      except Exception:
+        model = None  # エラー時はフォールバックに移行
 
-    # 予測結果を 0.0 ~ 10.0 の範囲に正規化・整形
-    forecast_days["predicted_mood"] = np.clip(raw_predictions, 0.0, 10.0)
+    if model is None:
+      # ルールベース計算（0~10スケール）
+      for _, row in input_data.iterrows():
+        base = float(row["mood_score"])
+        h_eff = (row["health_score"] - 5.0) * 0.15
+        s_eff = (row["sleep_hours"] - 7.0) * 0.2
+        m_eff = (row["meal_count"] - 3.0) * 0.15
+        e_eff = (row["exercise_score"] - 5.0) * 0.1
+        c_eff = -1.0 * row["class_count"] * 0.1
+        w_eff = -1.0 * row["work_hours"] * 0.1
+        t_eff = -1.0 * (row["task_unaccomplished_rate"] / 10.0) * 0.5
+        p_eff = -1.0 * np.abs(row["pressure_change"]) * 0.15
 
-    # ---------------- 画面表示 ----------------
-    st.subheader("🔮 今後1週間のメンタル・気分予測結果 (Colab AIモデル)")
+        s = base + h_eff + s_eff + m_eff + e_eff + c_eff + w_eff + t_eff + p_eff
+        predicted_scores.append(round(float(np.clip(s, 0.0, 10.0)), 1))
+
+    forecast_days["predicted_mood"] = predicted_scores
+
+    # 7. 画面表示
+    st.subheader("🔮 今後1週間のメンタル・気分予測結果")
     col1, col2 = st.columns([2, 1])
 
     with col1:
@@ -116,7 +173,6 @@ if weather_df is not None and model is not None:
       x_labels = [d.strftime("%m/%d") for d in forecast_days["date"]]
       y_values = forecast_days["predicted_mood"].tolist()
 
-      # 折れ線描画
       ax.plot(
           x_labels,
           y_values,
@@ -124,10 +180,9 @@ if weather_df is not None and model is not None:
           color="#1E88E5",
           linewidth=2.5,
           markersize=8,
-          label="AI予測スコア (0~10)",
+          label="予測気分スコア (0~10)",
       )
 
-      # 各データ点の上に数値を表示
       for i, val in enumerate(y_values):
         ax.text(
             i,
@@ -140,7 +195,6 @@ if weather_df is not None and model is not None:
             color="#1565C0",
         )
 
-      # 警戒ライン（5.0）
       ax.axhline(
           5.0,
           color="#E53935",
@@ -149,7 +203,6 @@ if weather_df is not None and model is not None:
           label="警戒ライン (5.0)",
       )
 
-      # 軸・範囲設定
       ax.set_ylim(0, 10.5)
       ax.set_yticks(range(0, 11))
       ax.set_ylabel("気分スコア (0:不調 ~ 10:好調)", fontsize=11)
@@ -182,15 +235,16 @@ if weather_df is not None and model is not None:
             f" {min_score:.1f}）"
         )
 
-    # データテーブル
     st.dataframe(
         forecast_days[["date", "predicted_mood", "pressure_change"]].rename(
             columns={
                 "date": "日付",
-                "predicted_mood": "AI予測気分スコア (0-10)",
+                "predicted_mood": "予測気分スコア (0-10)",
                 "pressure_change": "気圧変化 (hPa)",
             }
         )
     )
   else:
     st.error("気象予報データの範囲外です。")
+else:
+  st.error("気象データの取得に失敗しました。")
