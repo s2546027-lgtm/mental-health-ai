@@ -86,7 +86,7 @@ else:
   task_unaccomplished_rate = 0
   task_deadline_days = 999  # 課題なしの場合は影響のない大きい値
 
-st.sidebar.subheader("📍 位置情報（気象データ用）")
+st.sidebar.subheader("位置情報（気象データ用）")
 lat = st.sidebar.number_input("緯度 (デフォルト: 東京)", value=35.6762)
 lon = st.sidebar.number_input("経度 (デフォルト: 東京)", value=139.6503)
 
@@ -165,7 +165,7 @@ if weather_df is not None:
     forecast_days["predicted_mood"] = predicted_scores
 
     # 7. 画面表示
-    st.subheader("🔮 今後1週間のメンタル・気分予測結果")
+    st.subheader("今後1週間のメンタル・気分予測結果")
     col1, col2 = st.columns([2, 1])
 
     with col1:
@@ -219,7 +219,7 @@ if weather_df is not None:
       st.pyplot(fig)
 
     with col2:
-      st.write("### 💡 AIアドバイス")
+      st.write("### AIアドバイス")
       min_score = forecast_days["predicted_mood"].min()
       min_date = forecast_days.loc[
           forecast_days["predicted_mood"].idxmin(), "date"
