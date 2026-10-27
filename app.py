@@ -9,10 +9,10 @@ import japanize_matplotlib
 
 # 1. ページ設定
 st.set_page_config(
-    page_title="大学生向け メンタル不調・気分予報 AI", layout="wide"
+    page_title="大学生向け メンタル不調・気分予報", layout="wide"
 )
 
-st.title("🧠 大学生向け メンタル不調・気分予報 AI")
+st.title("大学生向け メンタル不調・気分予報")
 st.write(
     "生活習慣や現在のコンディション、および Open-Meteo"
     " 気象データ（気圧変化ΔP）から、今後1週間の気分推移を事前予測します。"
