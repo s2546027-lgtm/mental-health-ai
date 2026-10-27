@@ -6,6 +6,8 @@ import pandas as pd
 import requests
 import streamlit as st
 import japanize_matplotlib
+from google.oauth2.service_account import Credentials
+import gspread
 
 # 1. ページ設定
 st.set_page_config(
@@ -136,7 +138,18 @@ if weather_df is not None:
         "task_deadline_days": [task_deadline_days] * len(forecast_days),
         "pressure_change": forecast_days["pressure_change"],
     })
-
+# Google スプレッドシート接続関数
+def get_spreadsheet():
+  scopes = [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive",
+  ]
+  credentials = Credentials.from_service_account_info(
+      st.secrets["gcp_service_account"], scopes=scopes
+  )
+  client = gspread.authorize(credentials)
+  return client.open("mental_app_logs").sheet1
+    
     # 6. 推論処理（Colabモデルがある場合は推論、エラー時はルールベース）
     predicted_scores = []
     if model is not None:
@@ -163,6 +176,48 @@ if weather_df is not None:
         predicted_scores.append(round(float(np.clip(s, 0.0, 10.0)), 1))
 
     forecast_days["predicted_mood"] = predicted_scores
+
+# --- データ蓄積・答え合わせ用フォーム ---
+    st.markdown("---")
+    st.subheader("📝 本日のデータ蓄積・答え合わせ")
+    st.write(
+        "入力したコンディションと「実際の気分」を送信することで、今後のAI予測精度向上に役立てられます。"
+    )
+
+    actual_mood = st.slider(
+        "今日の「実際の気分」はどうでしたか？ (0:非常に悪い ~ 10:非常に良い)",
+        0,
+        10,
+        5,
+    )
+
+    if st.button("💾 データを送信して保存する"):
+      try:
+        sheet = get_spreadsheet()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 保存する1行データ
+        row_data = [
+            now_str,
+            mood_score,
+            health_score,
+            sleep_hours,
+            meal_count,
+            exercise_score,
+            class_count,
+            work_hours,
+            has_task,
+            task_unaccomplished_rate,
+            task_deadline_days,
+            actual_mood,
+        ]
+
+        sheet.append_row(row_data)
+        st.success(
+            "🎉 データをスプレッドシートに正常に保存しました！ご協力ありがとうございます。"
+        )
+      except Exception as e:
+        st.error(f"⚠️ 保存に失敗しました。設定を確認してください: {e}")
 
     # 7. 画面表示
     st.subheader("今後1週間のメンタル・気分予測結果")
