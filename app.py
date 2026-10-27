@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import japanize_matplotlib
 
 # 1. ページ設定
 st.set_page_config(
