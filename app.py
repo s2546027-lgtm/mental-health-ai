@@ -151,6 +151,7 @@ def get_spreadsheet():
   return client.open("mental_app_logs").sheet1
     
     # 6. 推論処理（Colabモデルがある場合は推論、エラー時はルールベース）
+    
     predicted_scores = []
     if model is not None:
       try:
