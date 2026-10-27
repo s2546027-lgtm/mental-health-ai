@@ -6,3 +6,5 @@ matplotlib
 requests
 japanize-matplotlib
 lightgbm
+gspread
+google-auth
