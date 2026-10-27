@@ -152,7 +152,7 @@ def get_spreadsheet():
     
     # 6. 推論処理（Colabモデルがある場合は推論、エラー時はルールベース）
     
-    predicted_scores = []
+predicted_scores = []
     if model is not None:
       try:
         raw_pred = model.predict(input_data)
