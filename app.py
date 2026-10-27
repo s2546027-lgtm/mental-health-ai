@@ -138,21 +138,20 @@ if weather_df is not None:
         "task_deadline_days": [task_deadline_days] * len(forecast_days),
         "pressure_change": forecast_days["pressure_change"],
     })
-# Google スプレッドシート接続関数
-def get_spreadsheet():
-  scopes = [
-      "https://www.googleapis.com/auth/spreadsheets",
-      "https://www.googleapis.com/auth/drive",
-  ]
-  credentials = Credentials.from_service_account_info(
-      st.secrets["gcp_service_account"], scopes=scopes
-  )
-  client = gspread.authorize(credentials)
-  return client.open("mental_app_logs").sheet1
+      # Google スプレッドシート接続関数
+    def get_spreadsheet():
+      scopes = [
+          "https://www.googleapis.com/auth/spreadsheets",
+          "https://www.googleapis.com/auth/drive",
+      ]
+      credentials = Credentials.from_service_account_info(
+          st.secrets["gcp_service_account"], scopes=scopes
+      )
+      client = gspread.authorize(credentials)
+      return client.open("mental_app_logs").sheet1
     
     # 6. 推論処理（Colabモデルがある場合は推論、エラー時はルールベース）
-    
-predicted_scores = []
+    predicted_scores = []
     if model is not None:
       try:
         raw_pred = model.predict(input_data)
